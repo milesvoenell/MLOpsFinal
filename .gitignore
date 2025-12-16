@@ -1,0 +1,22 @@
+# Virtual environments
+venv/
+mlflow_venv/
+
+# MLflow local run artifacts
+mlruns/
+mlflow.db
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Data files (if you don't want to push large CSVs)
+*.csv
+*.parquet
+*.h2o
+
+# Logs and outputs
+*.log
+*.png
