@@ -5,8 +5,12 @@ import mlflow.h2o
 import pandas as pd
 from datetime import datetime
 
+# Function for timestamped logs
+def log(msg):
+    print(f"{datetime.now()} - {msg}")
+
 # MLflow setup
-mlflow.set_tracking_uri("http://localhost:2000")
+mlflow.set_tracking_uri("http://18.232.31.184:2000")
 mlflow.set_experiment("Remote_H2O_Shooting_Models")
 
 # Load data
@@ -14,51 +18,67 @@ train = pd.read_csv("train_shooting.csv")
 valid = pd.read_csv("valid_shooting.csv")
 test  = pd.read_csv("test_shooting.csv")
 
-features = ["FG", "FGA", "FG%", "3P", "3PA", "3P%", "2P", "2PA", "2P%", "eFG%", "FT", "FTA", "FT%"]
+features = ["FG%", "3P%",  "2P%", "eFG%", "FT%"]
 target = "PTS"
 
-# Start H2O
-h2o.init(max_mem_size="4G")
+# Start H2O cluster with progress printing
+log("Initializing H2O cluster...")
+h2o.init(max_mem_size="4G", nthreads=-1, strict_version_check=False)
+
 train_hf = h2o.H2OFrame(train)
 valid_hf = h2o.H2OFrame(valid)
 test_hf  = h2o.H2OFrame(test)
 
-print(f"{datetime.now()} - Starting Stacked Ensemble training...")
+log("Starting H2O AutoML (Stacked Ensemble)...")
 
 with mlflow.start_run(run_name="StackedEnsemble_Shooting") as run:
-    # Train AutoML
-    aml = H2OAutoML(max_runtime_secs=600, seed=42)
+    aml = H2OAutoML(
+        max_runtime_secs=600,
+        seed=42,
+        verbosity="info",  # <-- ensures H2O logs progress
+        project_name="Shooting_AutoML"
+    )
+
     aml.train(x=features, y=target, training_frame=train_hf, validation_frame=valid_hf)
 
-    # Log leaderboard (all base models)
-    lb = aml.leaderboard.as_data_frame()
-    lb_file = "leaderboard.csv"
-    lb.to_csv(lb_file, index=False)
-    mlflow.log_artifact(lb_file)
-    print(f"{datetime.now()} - Leaderboard logged to MLflow.")
+    # Print leaderboard
+    log("AutoML Leaderboard:")
+    leaderboard_df = aml.leaderboard.as_data_frame()
+    print(leaderboard_df)
 
-    # Log each base model metrics
-    for model_id in aml.leaderboard['model_id']:
-        base_model = h2o.get_model(model_id)
-        perf = base_model.model_performance(test_hf)
-        mlflow.log_param(f"{model_id}_type", base_model.algo)
-        mlflow.log_metric(f"{model_id}_rmse", perf.rmse())
-        mlflow.log_metric(f"{model_id}_mae", perf.mae())
-        mlflow.log_metric(f"{model_id}_r2", perf.r2())
+    # Leader model
+    stacked_model = aml.leader
 
-    # Log final stacked ensemble (leader)
-    leader = aml.leader
-    leader_perf = leader.model_performance(test_hf)
+    # Evaluate performance on test set
+    perf = stacked_model.model_performance(test_hf)
+    rmse = perf.rmse()
+    mae = perf.mae()
+    r2 = perf.r2()
+
+    log(f"Stacked Ensemble complete. Test set performance -> RMSE: {rmse}, MAE: {mae}, R2: {r2}")
+
+    # Log parameters and metrics to MLflow
     mlflow.log_param("model_type", "StackedEnsemble")
-    mlflow.log_metric("rmse", leader_perf.rmse())
-    mlflow.log_metric("mae", leader_perf.mae())
-    mlflow.log_metric("r2", leader_perf.r2())
-    mlflow.h2o.log_model(leader, artifact_path="StackedEnsemble_Shooting")
+    mlflow.log_metric("rmse", rmse)
+    mlflow.log_metric("mae", mae)
+    mlflow.log_metric("r2", r2)
+
+    # Log the stacked ensemble model
+    mlflow.h2o.log_model(stacked_model, artifact_path="StackedEnsemble_Shooting")
+    log("Stacked Ensemble model logged to MLflow.")
+
+    # Save and log leaderboard as CSV
+    leaderboard_csv = "leaderboard.csv"
+    leaderboard_df.to_csv(leaderboard_csv, index=False)
+    mlflow.log_artifact(leaderboard_csv)
+    log("Leaderboard CSV logged to MLflow.")
 
     # Register model
     run_id = run.info.run_id
     model_uri = f"runs:/{run_id}/StackedEnsemble_Shooting"
     mlflow.register_model(model_uri=model_uri, name="StackedEnsemble_Shooting")
+    log(f"Stacked Ensemble registered. Run ID: {run_id}")
 
-print(f"{datetime.now()} - StackedEnsemble_Shooting training and registration complete.")
+# Shutdown H2O
 h2o.cluster().shutdown(prompt=False)
+log("H2O cluster shutdown. Training and registration complete.")
