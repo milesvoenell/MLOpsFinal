@@ -16,8 +16,8 @@ train = train.rename(columns=lambda x: x.replace('%','_pct'))
 valid = valid.rename(columns=lambda x: x.replace('%','_pct'))
 test  = test.rename(columns=lambda x: x.replace('%','_pct'))
 
-features = ["FG","FGA","FG_pct","3P","3PA","3P_pct","2P","2PA","2P_pct",
-            "eFG_pct","FT","FTA","FT_pct"]
+features = ["FG_pct","3P_pct","2P_pct",
+            "eFG_pct","FT_pct"]
 target = "PTS"
 
 h2o.init(max_mem_size="4G")
